@@ -1,43 +1,55 @@
 import { Lock, Eye, Key, FileVideo, Sparkles, Shield } from "lucide-react";
 import { Card } from "@/components/ui/card";
 
-export const FeatureShowcase = () => {
+type FeatureTab = "demo" | "encode" | "decode" | "learn";
+
+interface FeatureShowcaseProps {
+  onFeatureSelect?: (tab: FeatureTab) => void;
+}
+
+export const FeatureShowcase = ({ onFeatureSelect }: FeatureShowcaseProps) => {
   const features = [
     {
       icon: Lock,
       title: "LSB Encoding",
       description: "Hide messages in the least significant bits of audio samples, making them imperceptible to human ears.",
       color: "primary",
+      tab: "encode" as FeatureTab,
     },
     {
       icon: Key,
       title: "XOR Encryption",
       description: "Additional layer of security with key-based XOR encryption before embedding.",
       color: "accent",
+      tab: "learn" as FeatureTab,
     },
     {
       icon: Eye,
       title: "Invisible",
       description: "No detectable changes to audio quality. Messages remain completely hidden.",
       color: "secondary",
+      tab: "demo" as FeatureTab,
     },
     {
       icon: FileVideo,
       title: "Audio & Video Support",
       description: "Works with WAV audio files and video files (MP4, WebM, AVI, MOV). Full compatibility with media players.",
       color: "primary",
+      tab: "encode" as FeatureTab,
     },
     {
       icon: Sparkles,
       title: "Easy to Use",
       description: "Simple interface for encoding and decoding. No technical knowledge required.",
       color: "accent",
+      tab: "demo" as FeatureTab,
     },
     {
       icon: Shield,
       title: "Secure",
       description: "Key-based protection ensures only authorized users can extract messages.",
       color: "secondary",
+      tab: "decode" as FeatureTab,
     },
   ];
 
@@ -64,7 +76,16 @@ export const FeatureShowcase = () => {
             return (
               <Card
                 key={index}
-                className="p-6 glass-effect border-primary/10 hover-lift transition-all"
+                role="button"
+                tabIndex={0}
+                onClick={() => onFeatureSelect?.(feature.tab)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onFeatureSelect?.(feature.tab);
+                  }
+                }}
+                className="p-6 glass-effect border-primary/10 hover-lift transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/40"
               >
                 <div className={`w-12 h-12 rounded-lg ${colorClasses[feature.color as keyof typeof colorClasses]} flex items-center justify-center mb-4`}>
                   <Icon className="w-6 h-6" />

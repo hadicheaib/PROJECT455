@@ -1,7 +1,7 @@
 {
   "name": "project455",
   "version": "1.0.0",
-  "description": "Audio Steganography Application",
+  "description": "Audio and Video Steganography Application",
   "type": "module",
   "scripts": {
     "dev": "vite",

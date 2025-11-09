@@ -16,13 +16,18 @@ function IndexPage() {
     document.getElementById("main-interface")?.scrollIntoView({ behavior: "smooth" });
   };
 
+  const handleFeatureSelect = (tab: "demo" | "encode" | "decode" | "learn") => {
+    setActiveTab(tab);
+    document.getElementById("main-interface")?.scrollIntoView({ behavior: "smooth" });
+  };
+
   return (
     <div className="min-h-screen bg-background">
       {/* Hero Section */}
       <HeroSection onGetStarted={handleGetStarted} />
 
       {/* Feature Showcase */}
-      <FeatureShowcase />
+      <FeatureShowcase onFeatureSelect={handleFeatureSelect} />
 
       {/* Main Interface */}
       <section id="main-interface" className="py-16 bg-gradient-to-b from-background to-primary/5">
