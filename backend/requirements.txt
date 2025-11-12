@@ -3,3 +3,9 @@ uvicorn[standard]
 python-multipart
 python-dotenv
 pycryptodome
+cryptosteganography
+opencv-python-headless
+numpy
+text-blind-watermark
+Pillow
+python-magic

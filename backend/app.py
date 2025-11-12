@@ -1,6 +1,7 @@
-﻿import io
+﻿import base64
+import io
 import os
-import tempfile
+from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -8,7 +9,11 @@ from dotenv import load_dotenv
 
 from stego.audio import embed_audio, extract_audio
 from stego.audio_types import AudioProcessingError
-from stego.ffmpeg_utils import run_ffmpeg, FFmpegError
+from stego.image import embed_image, extract_image, ImageStegoError
+from stego.video import embed_video, extract_video, VideoStegoError
+from stego.image import embed_image, extract_image, ImageStegoError
+from stego.video import embed_video, extract_video, VideoStegoError
+from stego.text import embed_text, extract_text, TextStegoError
 
 load_dotenv()
 
@@ -22,6 +27,40 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+async def _resolve_secret_payload(
+    message_upload: Optional[UploadFile],
+    secret_upload: Optional[UploadFile],
+    require_text: bool = False,
+) -> tuple[Optional[str], Optional[bytes], Optional[str]]:
+    if secret_upload:
+        secret_bytes = await secret_upload.read()
+        if not secret_bytes:
+            raise HTTPException(status_code=400, detail="Secret file is empty")
+        return None, secret_bytes, secret_upload.filename or "secret.bin"
+
+    if message_upload:
+        payload = await message_upload.read()
+        if not payload:
+            raise HTTPException(status_code=400, detail="Message must not be empty")
+        try:
+            message = payload.decode("utf-8")
+            if not message and require_text:
+                raise HTTPException(status_code=400, detail="Message must not be empty")
+            return message, None, None
+        except UnicodeDecodeError:
+            if require_text:
+                raise HTTPException(status_code=400, detail="Message must be valid UTF-8 text")
+            return None, payload, message_upload.filename or "secret.bin"
+
+    raise HTTPException(status_code=400, detail="No secret payload provided")
+
+
+def _file_json_response(content: bytes, filename: Optional[str]) -> JSONResponse:
+    encoded = base64.b64encode(content).decode("ascii")
+    return JSONResponse({"file": {"filename": filename or "secret.bin", "data": encoded}})
+
 
 def _bool_from_form(value: str) -> bool:
     return value.lower() not in {"false", "0", "no"}
@@ -65,52 +104,32 @@ async def audio_extract(
 @app.post("/api/video/embed")
 async def video_embed(
     carrier: UploadFile = File(...),
-    message: UploadFile = File(...),
+    message: UploadFile | None = File(None),
+    secret_file: UploadFile | None = File(None),
     password: str = Form(...),
-    ecc: str = Form("true"),
-    container: str = Form("mkv"),
+    ecc: str = Form("true"),  # kept for backwards compatibility
+    container: str = Form("mp4"),
 ):
-    temp_flag = _bool_from_form(ecc)
-    container = container.lower() or "mkv"
-    if not container.isalnum():
-        raise HTTPException(status_code=400, detail="Invalid container format")
-    with tempfile.TemporaryDirectory(prefix="stego-") as tmpdir:
-        in_video = os.path.join(tmpdir, "in_video")
-        out_wav = os.path.join(tmpdir, "audio.wav")
-        stego_wav = os.path.join(tmpdir, "stego.wav")
-        out_video = os.path.join(tmpdir, f"out.{container}")
-        in_video_bytes = await carrier.read()
-        message_bytes = await message.read()
-        with open(in_video, "wb") as fh:
-            fh.write(in_video_bytes)
-        try:
-            run_ffmpeg(["-i", in_video, "-vn", "-acodec", "pcm_s16le", out_wav])
-            with open(out_wav, "rb") as fh:
-                wav_bytes = fh.read()
-            stego_bytes = embed_audio(wav_bytes, message_bytes, password, use_ecc=temp_flag)
-            with open(stego_wav, "wb") as fh:
-                fh.write(stego_bytes)
-            run_ffmpeg([
-                "-i", in_video,
-                "-i", stego_wav,
-                "-map", "0:v:0",
-                "-map", "1:a:0",
-                "-c:v", "copy",
-                "-c:a", "pcm_s16le",
-                "-shortest",
-                out_video,
-            ])
-        except (AudioProcessingError, FFmpegError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        with open(out_video, "rb") as fh:
-            content = fh.read()
+    video_bytes = await carrier.read()
+    secret_message, secret_bytes, secret_filename = await _resolve_secret_payload(message, secret_file)
+    try:
+        content, ext = embed_video(
+            video_bytes,
+            password,
+            container=container,
+            secret_message=secret_message,
+            secret_file=secret_bytes,
+            secret_filename=secret_filename,
+        )
+    except VideoStegoError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     mime = {
         "mp4": "video/mp4",
         "mkv": "video/x-matroska",
         "mov": "video/quicktime",
         "avi": "video/x-msvideo",
-    }.get(container, "application/octet-stream")
-    headers = {"Content-Disposition": f"attachment; filename=stego.{container}"}
+    }.get(ext, "video/mp4")
+    headers = {"Content-Disposition": f"attachment; filename=stego.{ext}"}
     return StreamingResponse(io.BytesIO(content), media_type=mime, headers=headers)
 
 
@@ -119,23 +138,76 @@ async def video_extract(
     carrier: UploadFile = File(...),
     password: str = Form(...),
 ):
-    with tempfile.TemporaryDirectory(prefix="stego-") as tmpdir:
-        in_video = os.path.join(tmpdir, "in_video.mkv")
-        out_wav = os.path.join(tmpdir, "audio.wav")
-        in_video_bytes = await carrier.read()
-        with open(in_video, "wb") as fh:
-            fh.write(in_video_bytes)
-        try:
-            run_ffmpeg(["-i", in_video, "-vn", "-acodec", "pcm_s16le", out_wav])
-            with open(out_wav, "rb") as fh:
-                wav_bytes = fh.read()
-            plain = extract_audio(wav_bytes, password)
-        except (AudioProcessingError, FFmpegError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    carrier_bytes = await carrier.read()
     try:
-        message = plain.decode("utf-8")
-    except UnicodeDecodeError:
-        message = plain.decode("utf-8", errors="replace")
+        message, file_bytes, filename = extract_video(carrier_bytes, password)
+    except VideoStegoError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if file_bytes is not None:
+        return _file_json_response(file_bytes, filename)
+    return JSONResponse({"message": message})
+
+
+@app.post("/api/image/embed")
+async def image_embed(
+    carrier: UploadFile = File(...),
+    message: UploadFile | None = File(None),
+    secret_file: UploadFile | None = File(None),
+    password: str = Form(...),
+):
+    carrier_bytes = await carrier.read()
+    secret_message, secret_bytes, secret_filename = await _resolve_secret_payload(message, secret_file)
+    try:
+        stego_bytes = embed_image(
+            carrier_bytes,
+            password,
+            secret_message=secret_message,
+            secret_file=secret_bytes,
+            secret_filename=secret_filename,
+        )
+    except ImageStegoError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    headers = {"Content-Disposition": "attachment; filename=stego.png"}
+    return StreamingResponse(io.BytesIO(stego_bytes), media_type="image/png", headers=headers)
+
+
+@app.post("/api/image/extract")
+async def image_extract(
+    carrier: UploadFile = File(...),
+    password: str = Form(...),
+):
+    carrier_bytes = await carrier.read()
+    try:
+        message, file_bytes, filename = extract_image(carrier_bytes, password)
+    except ImageStegoError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if file_bytes is not None:
+        return _file_json_response(file_bytes, filename)
+    return JSONResponse({"message": message})
+
+
+@app.post("/api/text/embed")
+async def text_embed(
+    host_text: str = Form(...),
+    message: str = Form(...),
+    password: str = Form(...),
+):
+    try:
+        watermarked = embed_text(host_text, message, password)
+    except TextStegoError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse({"watermarked": watermarked})
+
+
+@app.post("/api/text/extract")
+async def text_extract(
+    watermarked_text: str = Form(...),
+    password: str = Form(...),
+):
+    try:
+        message = extract_text(watermarked_text, password)
+    except TextStegoError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse({"message": message})
 
 

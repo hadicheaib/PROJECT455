@@ -3,9 +3,10 @@ import { Button } from "@/components/ui/button";
 
 interface HeroSectionProps {
   onGetStarted: () => void;
+  onLearnMore?: () => void;
 }
 
-export const HeroSection = ({ onGetStarted }: HeroSectionProps) => {
+export const HeroSection = ({ onGetStarted, onLearnMore }: HeroSectionProps) => {
   return (
     <section className="relative min-h-[90vh] flex items-center justify-center overflow-hidden bg-gradient-to-br from-primary/10 via-background to-accent/10">
       <div className="container mx-auto px-4 py-20 text-center relative z-10">
@@ -13,20 +14,20 @@ export const HeroSection = ({ onGetStarted }: HeroSectionProps) => {
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass-effect border border-primary/20 mb-6">
             <Shield className="w-4 h-4 text-primary" />
             <span className="text-sm font-medium text-foreground">
-              Secure Audio Steganography
+              Multi-format Steganography Suite
             </span>
           </div>
-          
+
           <h1 className="text-5xl md:text-7xl font-bold text-foreground mb-6 leading-tight">
-            Hide Messages in
-            <span className="block bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              Plain Audio
+            Hide Messages in Plain Sight
+            <span className="block bg-gradient-to-r from-primary via-accent to-secondary bg-clip-text text-transparent">
+              Audio • Video • Images • Text
             </span>
           </h1>
-          
+
           <p className="text-xl md:text-2xl text-muted-foreground mb-8 max-w-2xl mx-auto leading-relaxed">
-            Encode secret messages into audio files using advanced LSB steganography
-            with XOR encryption. Zero quality loss, maximum security.
+            Encrypt any message or file, wrap it in pristine media, and share it without raising suspicion.
+            AES-256 for images &amp; video, LSB+ECC for audio, and invisible text watermarks—one password, total control.
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
@@ -41,6 +42,7 @@ export const HeroSection = ({ onGetStarted }: HeroSectionProps) => {
             <Button
               variant="outline"
               size="lg"
+              onClick={() => (onLearnMore ? onLearnMore() : onGetStarted())}
               className="border-primary/50 text-primary hover:bg-primary/10 px-8 py-6 text-lg"
             >
               Learn More
@@ -54,7 +56,7 @@ export const HeroSection = ({ onGetStarted }: HeroSectionProps) => {
               </div>
               <h3 className="font-semibold text-foreground mb-2">Lightning Fast</h3>
               <p className="text-sm text-muted-foreground">
-                Encode and decode messages in seconds
+                Encode and decode audio, video, and images in seconds
               </p>
             </div>
             
@@ -64,7 +66,7 @@ export const HeroSection = ({ onGetStarted }: HeroSectionProps) => {
               </div>
               <h3 className="font-semibold text-foreground mb-2">Secure</h3>
               <p className="text-sm text-muted-foreground">
-                XOR encryption with key-based protection
+                AES-256 encryption, password-based access, and optional error correction
               </p>
             </div>
             
@@ -72,9 +74,9 @@ export const HeroSection = ({ onGetStarted }: HeroSectionProps) => {
               <div className="w-12 h-12 rounded-lg bg-secondary/20 flex items-center justify-center mb-4 mx-auto">
                 <ArrowDown className="w-6 h-6 text-secondary-foreground" />
               </div>
-              <h3 className="font-semibold text-foreground mb-2">Zero Loss</h3>
+              <h3 className="font-semibold text-foreground mb-2">Undetectable</h3>
               <p className="text-sm text-muted-foreground">
-                Perfect audio quality, undetectable changes
+                Perceptually identical outputs and invisible textual watermarks
               </p>
             </div>
           </div>

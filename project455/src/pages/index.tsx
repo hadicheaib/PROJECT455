@@ -6,6 +6,7 @@ import { EncoderPanel } from "@/components/EncoderPanel";
 import { DecoderPanel } from "@/components/DecoderPanel";
 import { MethodologySection } from "@/components/MethodologySection";
 import { DemoPanel } from "@/components/DemoPanel";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Lock, Unlock, BookOpen, Play } from "lucide-react";
 
 function IndexPage() {
@@ -23,8 +24,15 @@ function IndexPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Header with Theme Toggle */}
+      <header className="fixed top-0 right-0 z-50 p-4">
+        <ThemeToggle />
+      </header>
       {/* Hero Section */}
-      <HeroSection onGetStarted={handleGetStarted} />
+      <HeroSection
+        onGetStarted={handleGetStarted}
+        onLearnMore={() => handleFeatureSelect("learn")}
+      />
 
       {/* Feature Showcase */}
       <FeatureShowcase onFeatureSelect={handleFeatureSelect} />
@@ -32,6 +40,15 @@ function IndexPage() {
       {/* Main Interface */}
       <section id="main-interface" className="py-16 bg-gradient-to-b from-background to-primary/5">
         <div className="container mx-auto px-4">
+          {/* Breadcrumb Navigation */}
+          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6 animate-fade-in">
+            <span>Home</span>
+            <span>→</span>
+            <span className="text-foreground font-medium">
+              {activeTab === "demo" ? "Demo" : activeTab === "encode" ? "Encode" : activeTab === "decode" ? "Decode" : "Learn"}
+            </span>
+          </div>
+
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
             <div className="flex justify-center mb-8">
               <TabsList className="glass-effect p-1.5 h-auto animate-fade-in bg-card/80 backdrop-blur-sm border border-border/50 shadow-lg">
