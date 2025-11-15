@@ -1,12 +1,12 @@
 import os
 import tempfile
-
-import cv2  # type: ignore
-import numpy as np  # type: ignore
 from typing import Optional, Tuple
 
-from .ffmpeg_utils import FFmpegError, run_ffmpeg
-from .image import ImageStegoError, embed_image, extract_image
+import cv2
+import numpy as np
+
+from .image import embed_image, extract_image, ImageStegoError
+from .ffmpeg_utils import run_ffmpeg, FFmpegError
 
 
 class VideoStegoError(Exception):
@@ -18,6 +18,9 @@ def _ensure_password(password: str) -> None:
         raise VideoStegoError("Password is required for video steganography")
 
 
+# ---------------------------------------------------------------------
+#                            EMBED VIDEO
+# ---------------------------------------------------------------------
 def embed_video(
     video_bytes: bytes,
     password: str,
@@ -27,8 +30,9 @@ def embed_video(
     secret_file: Optional[bytes] = None,
     secret_filename: Optional[str] = None,
 ) -> Tuple[bytes, str]:
-    """Embed a message or file into the first frame of a video."""
+
     _ensure_password(password)
+
     if not secret_message and not secret_file:
         raise VideoStegoError("Either secret_message or secret_file must be provided")
 
@@ -37,121 +41,170 @@ def embed_video(
         container = "mp4"
 
     with tempfile.TemporaryDirectory(prefix="video-stego-") as tmpdir:
-        input_path = os.path.join(tmpdir, "input_video")
+
+        # ----------------------------------------------------------
+        # 💠 1. Write uploaded video to disk
+        # ----------------------------------------------------------
+        input_path = os.path.join(tmpdir, "input.mp4")
         with open(input_path, "wb") as fh:
             fh.write(video_bytes)
 
-        capture = cv2.VideoCapture(input_path)
-        if not capture.isOpened():
-            raise VideoStegoError("Unable to read carrier video")
+        # ----------------------------------------------------------
+        # 💠 2. Downscale to 720p using FFmpeg (HUGE speed boost)
+        # ----------------------------------------------------------
+        scaled_path = os.path.join(tmpdir, "scaled_720p.mp4")
+        try:
+            run_ffmpeg(
+                [
+                    "-i", input_path,
+                    "-vf", "scale=1280:720",
+                    "-preset", "fast",
+                    scaled_path,
+                ]
+            )
+        except FFmpegError:
+            raise VideoStegoError("Failed to downscale video")
 
-        fps = capture.get(cv2.CAP_PROP_FPS) or 30.0
-        width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        # Open downscaled video
+        cap = cv2.VideoCapture(scaled_path)
+        if not cap.isOpened():
+            raise VideoStegoError("Unable to read downscaled video")
 
-        success, first_frame = capture.read()
-        if not success or first_frame is None:
-            capture.release()
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        # ----------------------------------------------------------
+        # 💠 3. Read first frame
+        # ----------------------------------------------------------
+        ok, first_frame = cap.read()
+        if not ok or first_frame is None:
+            cap.release()
             raise VideoStegoError("Video does not contain readable frames")
 
-        # Hide message inside the first frame using the image steganography helper.
-        success, frame_buffer = cv2.imencode(".png", first_frame)
-        if not success:
-            capture.release()
-            raise VideoStegoError("Failed to serialise video frame")
+        # Convert first frame → BMP buffer (lossless)
+        ok, bmp_buffer = cv2.imencode(".bmp", first_frame, [])
+        if not ok:
+            cap.release()
+            raise VideoStegoError("Failed to encode frame as BMP")
 
+        # ----------------------------------------------------------
+        # 💠 4. Embed message/file in BMP using image stego
+        # ----------------------------------------------------------
         try:
             encoded_frame_bytes = embed_image(
-                frame_buffer.tobytes(),
+                bmp_buffer.tobytes(),
                 password,
                 secret_message=secret_message,
                 secret_file=secret_file,
                 secret_filename=secret_filename,
             )
         except ImageStegoError as exc:
-            capture.release()
-            raise VideoStegoError(str(exc)) from exc
+            cap.release()
+            raise VideoStegoError(f"Image stego failed: {exc}") from exc
 
+        # Convert modified BMP → ndarray
         encoded_frame_array = cv2.imdecode(
-            np.frombuffer(encoded_frame_bytes, dtype=np.uint8), cv2.IMREAD_COLOR
+            np.frombuffer(encoded_frame_bytes, dtype=np.uint8),
+            cv2.IMREAD_COLOR,
         )
         if encoded_frame_array is None:
-            capture.release()
-            raise VideoStegoError("Failed to decode encoded frame")
+            cap.release()
+            raise VideoStegoError("Failed to decode encoded BMP frame")
 
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        video_no_audio_path = os.path.join(tmpdir, "encoded_video.mp4")
-        writer = cv2.VideoWriter(video_no_audio_path, fourcc, fps, (width, height))
+        # ----------------------------------------------------------
+        # 💠 5. Create output video using a FAST lossless codec
+        # ----------------------------------------------------------
+        no_audio_path = os.path.join(tmpdir, "video_no_audio.avi")
+
+        # ⚡ HFYU = FAST, LOSSLESS, WINDOWS-COMPATIBLE
+        fourcc = cv2.VideoWriter_fourcc(*"HFYU")
+
+        writer = cv2.VideoWriter(no_audio_path, fourcc, fps, (width, height))
         if not writer.isOpened():
-            capture.release()
-            raise VideoStegoError("Unable to create output video")
+            cap.release()
+            raise VideoStegoError("Unable to create lossless output video")
 
+        # Write modified first frame
         writer.write(encoded_frame_array)
+
+        # Write all other frames unchanged
         while True:
-            success, frame = capture.read()
-            if not success:
+            ok, frame = cap.read()
+            if not ok:
                 break
             writer.write(frame)
 
         writer.release()
-        capture.release()
+        cap.release()
 
-        final_output_path = os.path.join(tmpdir, f"stego_video.{container}")
+        # ----------------------------------------------------------
+        # 💠 6. Merge audio from original video
+        # ----------------------------------------------------------
+        output_path = os.path.join(tmpdir, f"stego_output.{container}")
+
         try:
             run_ffmpeg(
                 [
-                    "-i",
-                    video_no_audio_path,
-                    "-i",
-                    input_path,
-                    "-c",
-                    "copy",
-                    "-map",
-                    "0:v:0",
-                    "-map",
-                    "1:a:0",
-                    final_output_path,
+                    "-i", no_audio_path,
+                    "-i", input_path,
+                    "-c:v", "copy",
+                    "-map", "0:v:0",
+                    "-map", "1:a:0",
+                    output_path,
                 ]
             )
-            output_path = final_output_path
         except FFmpegError:
-            # Fall back to the video without audio if we cannot remux the original track.
-            output_path = video_no_audio_path
-            container = "mp4"
+            # fallback — deliver AVI if remux fails
+            output_path = no_audio_path
+            container = "avi"
 
+        # ----------------------------------------------------------
+        # 💠 7. Return final stego video bytes
+        # ----------------------------------------------------------
         with open(output_path, "rb") as fh:
-            data = fh.read()
+            final_bytes = fh.read()
 
-        extension = os.path.splitext(output_path)[1].lstrip(".").lower() or "mp4"
-        return data, extension
+        extension = os.path.splitext(output_path)[1].lstrip(".").lower()
+        return final_bytes, extension
 
 
-def extract_video(video_bytes: bytes, password: str) -> tuple[Optional[str], Optional[bytes], Optional[str]]:
-    """Extract a hidden payload from the first frame of a video."""
+# ---------------------------------------------------------------------
+#                            EXTRACT VIDEO
+# ---------------------------------------------------------------------
+def extract_video(
+    video_bytes: bytes, password: str
+) -> tuple[Optional[str], Optional[bytes], Optional[str]]:
+
     _ensure_password(password)
 
     with tempfile.TemporaryDirectory(prefix="video-stego-") as tmpdir:
-        input_path = os.path.join(tmpdir, "stego_video")
-        with open(input_path, "wb") as fh:
+
+        # Save uploaded stego video
+        video_path = os.path.join(tmpdir, "stego_video.avi")
+        with open(video_path, "wb") as fh:
             fh.write(video_bytes)
 
-        capture = cv2.VideoCapture(input_path)
-        if not capture.isOpened():
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
             raise VideoStegoError("Unable to read stego video")
 
-        success, first_frame = capture.read()
-        capture.release()
-        if not success or first_frame is None:
+        ok, first_frame = cap.read()
+        cap.release()
+        if not ok or first_frame is None:
             raise VideoStegoError("Video does not contain readable frames")
 
-        success, frame_buffer = cv2.imencode(".png", first_frame)
-        if not success:
-            raise VideoStegoError("Failed to serialise video frame")
+        # Convert to BMP
+        ok, bmp_buffer = cv2.imencode(".bmp", first_frame, [])
+        if not ok:
+            raise VideoStegoError("Failed to serialise video frame to BMP")
 
+        # Extract hidden data
         try:
-            message, file_bytes, filename = extract_image(frame_buffer.tobytes(), password)
+            message, file_bytes, filename = extract_image(
+                bmp_buffer.tobytes(), password
+            )
         except ImageStegoError as exc:
-            raise VideoStegoError(str(exc)) from exc
+            raise VideoStegoError(f"Image extraction failed: {exc}") from exc
 
         return message, file_bytes, filename
-

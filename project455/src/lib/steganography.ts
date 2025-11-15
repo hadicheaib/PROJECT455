@@ -194,4 +194,3 @@ export function isAudioFile(file: File): boolean {
 export function isImageFile(file: File): boolean {
   return file.type.startsWith("image/") || /\.(png|jpe?g|bmp|gif)$/i.test(file.name);
 }
-

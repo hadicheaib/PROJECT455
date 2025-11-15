@@ -486,4 +486,3 @@ export const EncoderPanel: FC = () => {
     </div>
   );
 };
-
